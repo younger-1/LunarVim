@@ -1,3 +1,4 @@
+-- local require = require("lvim.utils.require").require
 local core_plugins = {
   -- Packer can manage itself as an optional plugin
   { "wbthomason/packer.nvim" },
@@ -6,30 +7,15 @@ local core_plugins = {
   {
     "jose-elias-alvarez/null-ls.nvim",
   },
-  { "antoinemadec/FixCursorHold.nvim" }, -- Needed while issue https://github.com/neovim/neovim/issues/12587 is still open
+  { "williamboman/mason-lspconfig.nvim" },
   {
-    "williamboman/nvim-lsp-installer",
+    "williamboman/mason.nvim",
+    config = function()
+      require("lvim.core.mason").setup()
+    end,
   },
   {
-    "lunarvim/onedarker.nvim",
-    config = function()
-      pcall(function()
-        if lvim and lvim.colorscheme == "onedarker" then
-          require("onedarker").setup()
-          lvim.builtin.lualine.options.theme = "onedarker"
-        end
-      end)
-    end,
-    disable = lvim.colorscheme ~= "onedarker",
-  },
-  {
-    "rcarriga/nvim-notify",
-
-    config = function()
-      require("lvim.core.notify").setup()
-    end,
-    requires = { "nvim-telescope/telescope.nvim" },
-    disable = not lvim.builtin.notify.active or not lvim.builtin.telescope.active,
+    "folke/tokyonight.nvim",
   },
   { "Tastyep/structlog.nvim" },
 
@@ -38,7 +24,7 @@ local core_plugins = {
   -- Telescope
   {
     "nvim-telescope/telescope.nvim",
-
+    branch = "0.1.x",
     config = function()
       require("lvim.core.telescope").setup()
     end,
@@ -60,19 +46,20 @@ local core_plugins = {
     end,
     requires = {
       "L3MON4D3/LuaSnip",
-      "rafamadriz/friendly-snippets",
     },
   },
   {
     "rafamadriz/friendly-snippets",
+    disable = not lvim.builtin.luasnip.sources.friendly_snippets,
   },
   {
     "L3MON4D3/LuaSnip",
     config = function()
       local utils = require "lvim.utils"
-      local paths = {
-        utils.join_paths(get_runtime_dir(), "site", "pack", "packer", "start", "friendly-snippets"),
-      }
+      local paths = {}
+      if lvim.builtin.luasnip.sources.friendly_snippets then
+        paths[#paths + 1] = utils.join_paths(get_runtime_dir(), "site", "pack", "packer", "start", "friendly-snippets")
+      end
       local user_snippets = utils.join_paths(get_config_dir(), "snippets")
       if utils.is_directory(user_snippets) then
         paths[#paths + 1] = user_snippets
@@ -97,9 +84,8 @@ local core_plugins = {
     "hrsh7th/cmp-path",
   },
   {
-    -- NOTE: Temporary fix till folke comes back
-    "max397574/lua-dev.nvim",
-    module = "lua-dev",
+    "folke/neodev.nvim",
+    module = "neodev",
   },
 
   -- Autopairs
@@ -135,7 +121,15 @@ local core_plugins = {
     end,
     disable = not lvim.builtin.nvimtree.active,
   },
-
+  -- Lir
+  {
+    "christianchiarulli/lir.nvim",
+    config = function()
+      require("lvim.core.lir").setup()
+    end,
+    requires = { "kyazdani42/nvim-web-devicons" },
+    disable = not lvim.builtin.lir.active,
+  },
   {
     "lewis6991/gitsigns.nvim",
 
@@ -148,7 +142,7 @@ local core_plugins = {
 
   -- Whichkey
   {
-    "max397574/which-key.nvim",
+    "folke/which-key.nvim",
     config = function()
       require("lvim.core.which-key").setup()
     end,
@@ -192,6 +186,15 @@ local core_plugins = {
     disable = not lvim.builtin.lualine.active,
   },
 
+  -- breadcrumbs
+  {
+    "SmiteshP/nvim-navic",
+    config = function()
+      require("lvim.core.breadcrumbs").setup()
+    end,
+    disable = not lvim.builtin.breadcrumbs.active,
+  },
+
   {
     "akinsho/bufferline.nvim",
     config = function()
@@ -212,12 +215,12 @@ local core_plugins = {
     disable = not lvim.builtin.dap.active,
   },
 
-  -- Debugger management
+  -- Debugger user interface
   {
-    "Pocco81/dap-buddy.nvim",
-    branch = "dev",
-    -- event = "BufWinEnter",
-    -- event = "BufRead",
+    "rcarriga/nvim-dap-ui",
+    config = function()
+      require("lvim.core.dap").setup_ui()
+    end,
     disable = not lvim.builtin.dap.active,
   },
 
@@ -245,11 +248,51 @@ local core_plugins = {
   {
     "b0o/schemastore.nvim",
   },
+
+  {
+    "RRethy/vim-illuminate",
+    config = function()
+      require("lvim.core.illuminate").setup()
+    end,
+    disable = not lvim.builtin.illuminate.active,
+  },
+
+  {
+    "lukas-reineke/indent-blankline.nvim",
+    config = function()
+      require("lvim.core.indentlines").setup()
+    end,
+    disable = not lvim.builtin.indentlines.active,
+  },
+
+  {
+    "lunarvim/onedarker.nvim",
+    branch = "freeze",
+    config = function()
+      pcall(function()
+        if lvim and lvim.colorscheme == "onedarker" then
+          require("onedarker").setup()
+          lvim.builtin.lualine.options.theme = "onedarker"
+        end
+      end)
+    end,
+    disable = lvim.colorscheme ~= "onedarker",
+  },
 }
 
-for _, entry in ipairs(core_plugins) do
-  if not os.getenv "LVIM_DEV_MODE" then
-    entry["lock"] = true
+local default_snapshot_path = join_paths(get_lvim_base_dir(), "snapshots", "default.json")
+local content = vim.fn.readfile(default_snapshot_path)
+local default_sha1 = vim.fn.json_decode(content)
+
+local get_default_sha1 = function(spec)
+  local short_name, _ = require("packer.util").get_plugin_short_name(spec)
+  return default_sha1[short_name] and default_sha1[short_name].commit
+end
+
+if not vim.env.LVIM_DEV_MODE then
+  for _, spec in ipairs(core_plugins) do
+    -- Manually lock the commit hash since Packer's snapshots are unreliable in headless mode
+    spec["commit"] = get_default_sha1(spec)
   end
 end
 
